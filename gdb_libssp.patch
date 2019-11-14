@@ -1,0 +1,21 @@
+--- gdb/Makefile.in	2019-09-21 00:04:41.000000000 +0200
++++ gdb/Makefile.in	2019-11-13 10:36:53.336353500 +0100
+@@ -184,6 +184,9 @@
+ # Where is lzma?  This will be empty if lzma was not available.
+ LIBLZMA = @LIBLZMA@
+ 
++# SSP Library
++LIBSSP = -lssp
++
+ # Where is libbabeltrace? This will be empty if lbabeltrace was not
+ # available.
+ LIBBABELTRACE = @LIBBABELTRACE@
+@@ -594,7 +597,7 @@
+ CLIBS = $(SIM) $(READLINE) $(OPCODES) $(BFD) $(ZLIB) $(INTL) $(LIBIBERTY) $(LIBDECNUMBER) \
+ 	$(XM_CLIBS) $(GDBTKLIBS) \
+ 	@LIBS@ @GUILE_LIBS@ @PYTHON_LIBS@ \
+-	$(LIBEXPAT) $(LIBLZMA) $(LIBBABELTRACE) $(LIBIPT) \
++	$(LIBSSP) $(LIBEXPAT) $(LIBLZMA) $(LIBBABELTRACE) $(LIBIPT) \
+ 	$(LIBIBERTY) $(WIN32LIBS) $(LIBGNU) $(LIBICONV) $(LIBMPFR) \
+ 	$(SRCHIGH_LIBS)
+ CDEPS = $(NAT_CDEPS) $(SIM) $(BFD) $(READLINE_DEPS) \

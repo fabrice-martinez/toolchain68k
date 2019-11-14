@@ -1,4 +1,19 @@
 # toolchain68k
+
+This is a heavily modified version of a script by haarer to build a cross compiler toolchain for m68k.
+
+The produced toolchain will include
+ * binutils 2.33.1
+ * gcc 9.2.0 with working libstdc++
+ * newlib 3.1.0
+ * gdb 8.3.1
+
+Yes, C++17 goodness on Neo Geo.
+libstdc++ and newlib compiled with stub syscalls so many things will fail. (this is a bare metal system)
+The modified version also support out of source build.
+
+--- ORIGINAL README FOLLOWS ---
+
 Main Goal:
 Build a toolchain for 68k, avr and cortex-m3 and cortex-m4  cross developement using recent compilers and libraries.
 

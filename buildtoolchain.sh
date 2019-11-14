@@ -25,10 +25,12 @@
 # some sh versions dont like the () after functions - call the script using bash helps
 #
 
+SCRIPT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+
 LOGFILE="`pwd`/buildlog.txt"
 
 #set the number of parallel makes
-MAKEJOBS=16
+MAKEJOBS=4
 
 #set this to the desired target architecture
 #TARGETARCHITECTURE=arm-none-eabi
@@ -47,49 +49,76 @@ else
     HOSTINSTALLPATH="/opt/crosschain"
 fi
 
-
-export CFLAGS='-O2 -pipe'
-export CXXFLAGS='-O2 -pipe'
+export CFLAGS='-O2 -fomit-frame-pointer -pipe'
+export CXXFLAGS='-O2 -fomit-frame-pointer -pipe'
 export LDFLAGS='-s'
 export DEBUG_FLAGS=''
 
+export CFLAGS_FOR_TARGET='-O2 -fomit-frame-pointer -ffunction-sections -fno-exceptions'
+export CXXFLAGS_FOR_TARGET='-O2 -fomit-frame-pointer -ffunction-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics'
 
-if [ "$TARGETARCHITECTURE" == "arm-none-eabi" ]; then
-        MACHINEFLAGS="--with-cpu=cortex-m4 --with-cpu=cortex-m3 --with-fpu=fpv4-sp-d16 --with-float=hard --with-float=softfp 
--with-float=soft --with-mode=thumb"
-	GCCFLAGS=$MACHINEFLAGS
-	BINUTILSFLAGS=$MACHINEFLAGS
-	LIBCFLAGS=$MACHINEFLAGS
-	GDBFLAGS=$MACHINEFLAGS
+if [ "$TARGETARCHITECTURE" == "m68k-elf" ]; then
+    MACHINEFLAGS="--with-cpu=m68000"
+    GCCFLAGS=$MACHINEFLAGS
+    BINUTILSFLAGS=$MACHINEFLAGS
+    LIBCFLAGS=$MACHINEFLAGS
+    GDBFLAGS=$MACHINEFLAGS
 fi
-
-
-
-
 
 export PATH=$HOSTINSTALLPATH/bin:$PATH
 
 function determine_os () {
-	if [ -f /etc/lsb-release ]; then
-	    . /etc/lsb-release 
-	    OS=$DISTRIB_ID
-	    VER=$DISTRIB_RELEASE
-	elif [ -f /usr/bin/lsb_release ]; then
-	    OS=`/usr/bin/lsb_release -is`
-	    VER=`/usr/bin/lsb_release -rs`
-	elif [ -f /etc/debian_version ]; then
-	    OS=Debian  # XXX or Ubuntu??
-	    VER=$(cat /etc/debian_version)
-	else
-	    OS=$(uname -s)
-	    VER=$(uname -r)
-	fi
+    if [ -f /etc/lsb-release ]; then
+        . /etc/lsb-release 
+        OS=$DISTRIB_ID
+        VER=$DISTRIB_RELEASE
+    elif [ -f /usr/bin/lsb_release ]; then
+        OS=`/usr/bin/lsb_release -is`
+        VER=`/usr/bin/lsb_release -rs`
+    elif [ -f /etc/debian_version ]; then
+        OS=Debian  # XXX or Ubuntu??
+        VER=$(cat /etc/debian_version)
+    else
+        OS=$(uname -s)
+        VER=$(uname -r)
+    fi
 }
 
 function log_msg () {
-	local logline="`date` $1"
-	echo $logline >> $LOGFILE
-	echo $logline
+    local logline="`date` $1"
+    echo $logline >> $LOGFILE
+    echo $logline
+}
+
+# -------------------------------------------------------------------------------------------
+log_msg " start of buildscript"
+
+determine_os
+log_msg " building on OS: $OS $VER for target architecture $TARGETARCHITECTURE"
+if [[ $OS = MINGW* ]]; then
+    EXECUTEABLESUFFIX=".exe"
+    echo "ouch.. on windows"
+else
+    echo "not on windows"
+    EXECUTEABLESUFFIX=""
+fi
+
+if [ ! -d cross-toolchain ]; then
+    mkdir cross-toolchain
+fi
+
+cd cross-toolchain
+
+M68KBUILD=`pwd`
+echo "build path:" $M68KBUILD
+
+function move_base_dir() {
+    cd $M68KBUILD
+}
+
+function move_build_dir() {
+    local SOURCENAME=$1
+    cd $M68KBUILD/$SOURCENAME/cross-chain-$TARGETARCHITECTURE-obj
 }
 
 #todo, consider this
@@ -101,6 +130,8 @@ function prepare_source () {
     local BASEURL=$1
     local SOURCENAME=$2
     local ARCHTYPE=$3
+    
+    move_base_dir
 
     if [ "$ARCHTYPE" = "git" ]; then
         if [ ! -f $SOURCENAME.$ARCHTYPE ]; then
@@ -157,8 +188,11 @@ function install_package () {
 
 function conf_compile_source () {
     local SOURCEPACKAGE=$1
-    local DETECTFILE=$2
-    local CONFIGURESTRING=$3
+    local SOURCENAME=$2
+    local DETECTFILE=$3
+    local CONFIGURESTRING=$4
+
+    move_build_dir $SOURCENAME
 
     log_msg "CCS sourcepackage= $SOURCEPACKAGE"
     log_msg "CCS detect file= $DETECTFILE"
@@ -187,55 +221,21 @@ function conf_compile_source () {
 
 }
 
-# -------------------------------------------------------------------------------------------
-log_msg " start of buildscript"
-
-determine_os
-log_msg " building on OS: $OS $VER for target architecture $TARGETARCHITECTURE"
-if [[ $OS = MINGW* ]]; then
-	EXECUTEABLESUFFIX=".exe"
-	echo "ouch.. on windows"
-else
-	echo "not on windows"
-	EXECUTEABLESUFFIX=""
-fi
-
-if [ ! -d cross-toolchain ]; then
-	mkdir cross-toolchain
-fi
-
-cd cross-toolchain
-
-M68KBUILD=`pwd`
-echo "build path:" $M68KBUILD
-
-
+# STEP1 Fetch and uncompress all sources
 
 #-------------------------------- BINUTILS --------------------------------------------------
-# build binutils
+# fetch binutils
 
-log_msg ">>>> build binutils"
-BINUTILS="binutils-2.32"
+log_msg ">>>> fetch binutils"
+BINUTILS="binutils-2.33.1"
 
 prepare_source http://ftp.gnu.org/gnu/binutils  $BINUTILS tar.bz2
 
-if [ "$TARGETARCHITECTURE" = "avr" ]; then
-	log_msg "patching binutils"
-	tmpdir=`pwd`
-	cd ..
-	patch  -p0 -i $M68KBUILD/../avr_binutils.patch
-	cd $tmpdir
-fi
-
-BINUTILSFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/" 
-conf_compile_source binutils "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-objcopy$EXECUTEABLESUFFIX" "$BINUTILSFLAGS"
-
-cd $M68KBUILD
 
 #--------------------------------- GCC ------------------------------------------------
-# build gcc
+# fetch gcc
 
-log_msg ">>>> build gcc"
+log_msg ">>>> fetch gcc"
 GCCVER="gcc-9.2.0"
 
 prepare_source ftp://ftp.gwdg.de/pub/misc/gcc/releases/$GCCVER $GCCVER tar.xz
@@ -247,160 +247,76 @@ if [ ! -d ../gmp ]; then
     cd cross-chain-$TARGETARCHITECTURE-obj
 fi
 
-GCCFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --enable-languages=c,c++ --disable-bootstrap --with-newlib --disable-libmudflap --disable-libssp --disable-libgomp --disable-libstdcxx-pch --disable-threads --with-gnu-as --with-gnu-ld --disable-nls --with-headers=yes --disable-checking --without-headers"
+ #--------------------------------LIBC NEWLIB -------------------------------------------------
+#fetch libc for other platforms
 
-conf_compile_source gcc "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-gcov$EXECUTEABLESUFFIX" "$GCCFLAGS"
+log_msg ">>>> fetch newlib"
+LIBCVER="newlib-3.1.0"
 
-cd $M68KBUILD
+prepare_source ftp://sources.redhat.com/pub/newlib $LIBCVER tar.gz
 
-if [ "$TARGETARCHITECTURE" = "avr" ]; then
-    #--------------------------------LIBC LIBAVR -------------------------------------------------
-    #build avr libc
+log_msg "patching newlib to automatically determine _LDBL_EQ_DBL"
+tmpdir=`pwd`
+cd ..
+echo `pwd`
+patch  -p1 -i $SCRIPT_DIR/newlib.patch
+cd $tmpdir
 
-    log_msg ">>>> build avrlib"
-    LIBCVER="avr-libc-2.0.0"
-
-    prepare_source http://download.savannah.gnu.org/releases/avr-libc $LIBCVER tar.bz2
-
-    export PATH=$PATH:/opt/$TARGETARCHITECTURE/bin/
-
-    LIBCFLAGS+=" --host=avr --prefix=$HOSTINSTALLPATH/"
-
-    conf_compile_source avrlib "$HOSTINSTALLPATH/$TARGETARCHITECTURE/lib/libc.a" "$LIBCFLAGS"
-
-    cd $M68KBUILD
-
-else
-
-    #--------------------------------LIBC NEWLIB -------------------------------------------------
-    #build libc for other platforms
-
-    log_msg ">>>> build newlib"
-    LIBCVER="newlib-3.1.0"
-
-    prepare_source ftp://sources.redhat.com/pub/newlib $LIBCVER tar.gz
-
-    log_msg "patching newlib to automatically determine _LDBL_EQ_DBL"
-    tmpdir=`pwd`
-    cd ..
-    echo `pwd`
-    patch  -p1 -i $M68KBUILD/../newlib.patch
-    cd $tmpdir
-
-
-    export PATH=$PATH:/opt/$TARGETARCHITECTURE/bin/
-
-    LIBCFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --enable-newlib-reent-small --disable-malloc-debugging --enable-newlib-multithread --disable-newlib-io-float --disable-newlib-supplied-syscalls --disable-newlib-io-c99-formats --disable-newlib-mb --disable-newlib-atexit-alloc --enable-target-optspace --disable-shared --enable-static --enable-fast-install"
-
-    conf_compile_source newlib "$HOSTINSTALLPATH/$TARGETARCHITECTURE/lib/libc.a" "$LIBCFLAGS"
-
-    cd $M68KBUILD
-
-fi
-
-
-#---------------------------------------------------------------------------------
-#build gdb
+#---------------------------------GDB---------------------------------------------
+#fetch gdb
 #sudo apt-get install ncurses-dev
-GDBVER="gdb-8.3"
+GDBVER="gdb-8.3.1"
 
-log_msg ">>>> build gdb"
+log_msg ">>>> fetch gdb"
 prepare_source http://ftp.gnu.org/gnu/gdb $GDBVER tar.xz
 
-GDBFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/"
+log_msg "patching gdb"
+tmpdir=`pwd`
+cd ..
+patch  -p0 -i $SCRIPT_DIR/gdb_python.patch
+patch  -p0 -i $SCRIPT_DIR/gdb_libssp.patch
+cd $tmpdir
 
-conf_compile_source gdb "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-gdb$EXECUTEABLESUFFIX" "$GDBFLAGS"
+# STEP2 Build everything
+    
+NEWLIB_INCLUDES="$M68KBUILD/$LIBCVER/newlib/libc/include"
+
+#-------------------------------- BINUTILS --------------------------------------------------
+# build binutils
+log_msg ">>>> build binutils"
+
+BINUTILSFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --with-headers=$NEWLIB_INCLUDES" 
+conf_compile_source binutils $BINUTILS "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-objcopy$EXECUTEABLESUFFIX" "$BINUTILSFLAGS"
+
+#--------------------------------- GCC ------------------------------------------------
+# build gcc
+log_msg ">>>> build gcc"
+
+GCCFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --enable-languages=c,c++ --disable-bootstrap --with-newlib --disable-libmudflap --enable-lto --disable-libssp --disable-libgomp --disable-libstdcxx-pch --disable-threads --with-gnu-as --with-gnu-ld --disable-nls --with-headers=yes --disable-checking --without-headers --disable-libstdcxx-threads --disable-multilib --with-headers=$NEWLIB_INCLUDES"
+
+conf_compile_source gcc $GCCVER "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-gcov$EXECUTEABLESUFFIX" "$GCCFLAGS"
+
+# Put the cross compiler in the path
+export PATH=$PATH:$HOSTINSTALLPATH/bin/
+
+#--------------------------------LIBC NEWLIB -------------------------------------------------
+#build libc for other platforms
+log_msg ">>>> build newlib"
+
+LIBCFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --disable-multilib --enable-newlib-nano-formatted-io --enable-newlib-reent-small --disable-malloc-debugging --enable-newlib-multithread --disable-newlib-io-float --disable-newlib-supplied-syscalls --disable-newlib-io-c99-formats --disable-newlib-mb --disable-newlib-atexit-alloc --enable-target-optspace --disable-shared --enable-static --enable-fast-install --enable-languages=c,c++ --with-headers=$NEWLIB_INCLUDES"
+
+conf_compile_source newlib $LIBCVER "$HOSTINSTALLPATH/$TARGETARCHITECTURE/lib/libc.a" "$LIBCFLAGS"
+
+
+#---------------------------------GDB---------------------------------------------
+#build gdb
+log_msg ">>>> build gdb"
+
+GDBFLAGS+=" --target=$TARGETARCHITECTURE --prefix=$HOSTINSTALLPATH/ --with-headers=$NEWLIB_INCLUDES"
+
+conf_compile_source gdb $GDBVER "$HOSTINSTALLPATH/bin/$TARGETARCHITECTURE-gdb$EXECUTEABLESUFFIX" "$GDBFLAGS"
 
 cd $M68KBUILD
-
-
-
-# musasim bauen
-# https://code.google.com/p/musasim/
-#apt-get install libsdl2-dev
-#apt-get install libargtable2-dev
-#apt-get install libfontconfig-dev
-#apt-get install libelf-dev
-
-# dafür braucht man auch libsdl2 ttf die bei debian nicht im repo ist - suxx
-#wget https://www.libsdl.org/projects/SDL_ttf/release/SDL2_ttf-2.0.12.tar.gz
-#tar xvzf SDL2_ttf-2.0.12.tar.gz
-#cd SDL2_ttf-2.0.12/
-#./configure
-#make
-#sudo make install
-
-
-#git clone https://code.google.com/p/musasim/
-#cd muasim
-#./bootstrap.sh
-#cd musasim
-## vorher in verzeichnis ui das makefile fixen, es fehlt `pkg-config --cflags SDL2_ttf` bei den cflags
-#make 
-
-
-if [ "$TARGETARCHITECTURE" = "avr" ]; then
-
-
-    #---------------------------------------------------------------------------------
-    #build avrdude.
-    #   On windows builds, avrdude needs the libusb or libftdi for certain programmers
-    #   but not for flashing an arduino using the usb cable using the avrdude wiring configuration.
-    #   see make file of avr example
-
-    log_msg ">>>> build avrdude"
-    AVRDUDEVER="avrdude-6.3"
-
-    prepare_source http://download.savannah.gnu.org/releases/avrdude $AVRDUDEVER tar.gz
-
-    export PATH=$PATH:/opt/$TARGETARCHITECTURE/bin/
-
-    conf_compile_source avrdude "$HOSTINSTALLPATH/$TARGETARCHITECTURE/bin/avrdude" " --prefix=$HOSTINSTALLPATH/"
-
-    cd $M68KBUILD
-
-fi
-
-
-if [ "$TARGETARCHITECTURE" = "arm-none-eabi" ]; then
-
-
-    #---------------------------------------------------------------------------------
-    #build texane stutils.
-    #   On windows builds,  needs the libusb
-    #   see make file of arm-none-eabi example
-
-    log_msg ">>>> build texane/stlink"
-    STLINKVER="stlink"
-
-
-prepare_source https://github.com/texane/stlink.git $STLINKVER git
-
-    if [ ! -f /opt/$TARGETARCHITECTURE/bin/st-flash.exe ]; then
-
-        log_msg "building $SOURCEPACKAGE"
-        cd ..
-        if [ $OS = "Debian" ] || [ $OS = "Fedora" ]; then # on linux install stlink into system
-        cmake . -Bcross-chain-$TARGETARCHITECTURE-obj
-        else
-        cmake . -DCMAKE_INSTALL_PREFIX:PATH=$HOSTINSTALLPATH -Bcross-chain-$TARGETARCHITECTURE-obj
-        fi
-        cd cross-chain-$TARGETARCHITECTURE-obj
-        make
-        log_msg "building $SOURCEPACKAGE finished"
-
-
-        log_msg "install $SOURCEPACKAGE"
-        install_package
-        log_msg "install $SOURCEPACKAGE finished"
-
-    else
-        log_msg "compiling and install texane/stlink skipped"
-    fi
-
-    cd $M68KBUILD
-
-fi
 
 #---------------------------------------------------------------------------------
 #build pio package if required

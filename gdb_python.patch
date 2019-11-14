@@ -1,0 +1,31 @@
+--- gdb/python/python.c	2019-09-20 23:04:41.000000000 +0200
++++ gdb/python/python.c	2019-11-12 13:55:03.982157100 +0100
+@@ -338,15 +338,24 @@
+ 
+   /* Because we have a string for a filename, and are using Python to
+      open the file, we need to expand any tilde in the path first.  */
+-  gdb::unique_xmalloc_ptr<char> full_path (tilde_expand (filename));
+-  gdbpy_ref<> python_file (PyFile_FromString (full_path.get (), (char *) "r"));
+-  if (python_file == NULL)
++
++  #ifndef IS_PY3K
++
++    gdb::unique_xmalloc_ptr<char> full_path (tilde_expand (filename));
++    gdbpy_ref<> python_file (PyFile_FromString (full_path.get (), (char *) "r"));
++    if (python_file == NULL)
+     {
+       gdbpy_print_stack ();
+       error (_("Error while opening file: %s"), full_path.get ());
+     }
+ 
+-  PyRun_SimpleFile (PyFile_AsFile (python_file.get ()), filename);
++    PyRun_SimpleFile (PyFile_AsFile (python_file.get ()), filename);
++
++  #else
++    /* Python 3 no loner exposes FILE structs, so we are out of luck */
++    gdb::unique_xmalloc_ptr<char> full_path (tilde_expand (filename));
++    PyRun_SimpleFile (fopen (full_path.get(), "r"), filename);
++  #endif
+ 
+ #endif /* _WIN32 */
+ }
